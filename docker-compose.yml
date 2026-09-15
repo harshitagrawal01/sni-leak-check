@@ -1,0 +1,7 @@
+services:
+  sni-leak-check:
+    build: .
+    image: sni-leak-check
+    ports:
+      - "8000:8000"
+    restart: unless-stopped

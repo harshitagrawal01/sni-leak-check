@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Does your hostname leak? — SNI &amp; ECH checker</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --card: #ffffff; --ink: #16161d; --muted: #5c5c6b;
+    --line: #e4e4ec; --accent: #0a6cff; --bad: #c02b3a; --good: #147a4a;
+    --code: #f0f0f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e0e12; --card: #17171d; --ink: #ececf1; --muted: #9a9aab;
+      --line: #26262f; --accent: #4f9dff; --bad: #ff6b78; --good: #46d08a;
+      --code: #1e1e26;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 40px 20px 80px; }
+  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  form { display: flex; gap: 8px; margin-bottom: 10px; }
+  input {
+    flex: 1; padding: 13px 14px; font-size: 16px; border: 1px solid var(--line);
+    border-radius: 10px; background: var(--card); color: var(--ink);
+  }
+  input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  button {
+    padding: 13px 20px; font-size: 16px; font-weight: 600; border: 0;
+    border-radius: 10px; background: var(--accent); color: #fff; cursor: pointer;
+  }
+  button:disabled { opacity: .6; cursor: default; }
+  .examples { font-size: 14px; color: var(--muted); margin-bottom: 28px; }
+  .examples a { color: var(--accent); text-decoration: none; cursor: pointer; margin-right: 12px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 22px; margin-bottom: 18px;
+  }
+  .verdict { font-size: 20px; font-weight: 650; margin: 0 0 4px; display: flex; align-items: center; gap: 10px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+  .leak .dot { background: var(--bad); } .leak .verdict { color: var(--bad); }
+  .hidden-ok .dot { background: var(--good); } .hidden-ok .verdict { color: var(--good); }
+  .rows { margin-top: 16px; border-top: 1px solid var(--line); }
+  .row { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+  .row .k { color: var(--muted); } .row .v { text-align: right; word-break: break-all; }
+  code, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; background: var(--code); padding: 1px 6px; border-radius: 6px; font-size: 13px; }
+  .explain { color: var(--muted); font-size: 14px; }
+  .explain h2 { color: var(--ink); font-size: 15px; margin: 22px 0 6px; }
+  footer { margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+  footer a { color: var(--accent); text-decoration: none; }
+  .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: s .7s linear infinite; }
+  @keyframes s { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Does your hostname leak on the wire?</h1>
+  <p class="sub">HTTPS encrypts what you send. It does not, by default, hide <em>which site</em> you asked for. Enter a domain and find out whether its name travels in the clear, and whether it publishes an Encrypted ClientHello config that would hide it.</p>
+
+  <form id="f">
+    <input id="d" placeholder="example.com" autocomplete="off" autocapitalize="off" spellcheck="false" autofocus>
+    <button id="b" type="submit">Check</button>
+  </form>
+  <div class="examples">
+    Try:
+    <a data-d="crypto.cloudflare.com">crypto.cloudflare.com</a>
+    <a data-d="cloudflare.com">cloudflare.com</a>
+    <a data-d="github.com">github.com</a>
+  </div>
+
+  <div id="out"></div>
+
+  <div class="explain">
+    <h2>What this checks</h2>
+    <p>Every ordinary TLS handshake begins with a ClientHello that names the site you want, in a field called the Server Name Indication (SNI). It is sent before any key exists, so it is readable by anything on the network path. That is how domain-based blocking and filtering work without breaking the encryption itself.</p>
+    <p>Encrypted ClientHello (ECH) fixes this by publishing a public key in DNS ahead of time; a capable client uses it to encrypt the real hostname inside an outer ClientHello that carries only a generic cover name. This tool reports whether a domain publishes such a config. It reads public DNS only, sends nothing to the site, and keeps no record of what you type.</p>
+    <p>One caveat worth knowing: ECH only buys real privacy when your DNS lookups are encrypted too, otherwise the name simply leaks from the DNS query instead.</p>
+  </div>
+
+  <footer>
+    Open source — pull it and run your own copy. <a id="gh" href="https://github.com/oceanforge/sni-leak-check">github.com/oceanforge/sni-leak-check</a>.
+    Built as a companion to <a id="post" href="https://dev.to/remdore">a write-up of how the SNI leaks</a>.
+    Contributions welcome, especially during Hacktoberfest.
+  </footer>
+</main>
+
+<script>
+const out = document.getElementById('out');
+const inp = document.getElementById('d');
+const btn = document.getElementById('b');
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function render(r){
+  if (r.error){ out.innerHTML = `<div class="card"><div class="verdict">⚠︎ ${esc(r.error)}</div></div>`; return; }
+  const leaks = !r.ech_published;
+  const cls = leaks ? 'leak' : 'hidden-ok';
+  const verdict = leaks
+    ? 'The hostname leaks. Anyone on the path sees it.'
+    : 'This site publishes ECH. A capable client can hide the name.';
+  let rows = `
+    <div class="row"><span class="k">Name sent in the ClientHello</span><span class="v"><code>${esc(r.sni_sent_in_clear)}</code></span></div>
+    <div class="row"><span class="k">ECH config published in DNS</span><span class="v">${r.ech_published ? 'yes' : 'no'}</span></div>`;
+  if (r.ech){
+    rows += `
+    <div class="row"><span class="k">Cover name a watcher would see</span><span class="v"><code>${esc(r.ech.public_name)}</code></span></div>
+    <div class="row"><span class="k">Key exchange</span><span class="v">${esc(r.ech.kem)}</span></div>
+    <div class="row"><span class="k">ECH version</span><span class="v"><code>${esc(r.ech.version)}</code></span></div>`;
+  }
+  out.innerHTML = `<div class="card ${cls}"><div class="verdict"><span class="dot"></span>${verdict}</div>
+    <div class="rows">${rows}</div></div>`;
+}
+
+async function run(domain){
+  if (!domain) return;
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
+  try {
+    const res = await fetch('/api/check?domain=' + encodeURIComponent(domain));
+    render(await res.json());
+  } catch(e){
+    out.innerHTML = `<div class="card"><div class="verdict">⚠︎ request failed</div></div>`;
+  }
+  btn.disabled = false; btn.textContent = 'Check';
+}
+
+document.getElementById('f').addEventListener('submit', e => { e.preventDefault(); run(inp.value); });
+document.querySelectorAll('.examples a').forEach(a =>
+  a.addEventListener('click', () => { inp.value = a.dataset.d; run(a.dataset.d); }));
+</script>
+</body>
+</html>
