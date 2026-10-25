@@ -19,10 +19,8 @@ record of what you type.
 With Docker:
 
 ```bash
-git clone https://github.com/oceanforge/sni-leak-check
-cd sni-leak-check
-docker compose up --build           # then open http://localhost:8000
-```
+docker run -p 8000:8000 ghcr.io/oceanforge/sni-leak-check:latest
+# then open http://localhost:8000
 
 Without Docker:
 
